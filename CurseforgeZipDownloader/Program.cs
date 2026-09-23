@@ -20,12 +20,12 @@ namespace CurseforgeZipDownloader
             if (zipFiles.Count == 0)
             {
                 Console.WriteLine($"Found no zip file in \"{cwd}\". Exiting.");
-                Environment.Exit(0);
+                Exit();
             }
             if (zipFiles.Count > 1)
             {
                 Console.WriteLine($"Found multiple zip files in \"{cwd}\". Exiting.");
-                Environment.Exit(0);
+                Exit();
             }
 
             var zipPath = zipFiles.First().FullName;
@@ -46,10 +46,10 @@ namespace CurseforgeZipDownloader
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine($"Unexpected Error: Could not convert manifest file \"{manifestfile}\". Exiting.");
                 Console.ResetColor();
-                Environment.Exit(0);
+                Exit();
             }
 
-            var modInfos = manifest.files;
+            var modInfos = manifest!.files;
             var modUrls = new string[modInfos.Count];
 
             for (int i = 0; i < modInfos.Count; i++)
@@ -97,6 +97,8 @@ namespace CurseforgeZipDownloader
                     file.MoveTo(AdditionalFolder + $"\\{file.Name}");
                 }
             }
+
+            Exit();
         }
 
         static void AskDelete(string dir)
@@ -105,11 +107,15 @@ namespace CurseforgeZipDownloader
             var ans = Console.ReadLine() ?? string.Empty;
             if (ans.StartsWith('y'))
                 Directory.Delete(dir, true);
-            else
-            {
-                Console.WriteLine("Exiting.");
-                Environment.Exit(0);
-            }
+            else            
+                Exit();
+        }
+
+        static void Exit()
+        {
+            Console.WriteLine("Press any key to exit.");
+            Console.ReadKey();
+            Environment.Exit(0);
         }
     }
 }
