@@ -7,6 +7,8 @@ namespace CurseforgeZipDownloader
 {
     internal class Program
     {
+        const string AdditionalFolder = "additional_files";
+
         static async Task Main(string[] args)
         {
             var cwd = Directory.GetCurrentDirectory();
@@ -35,28 +37,6 @@ namespace CurseforgeZipDownloader
             Console.WriteLine($"Unzipping to \"{folderPath}\"");
             ZipFile.ExtractToDirectory(zipPath, folderPath);
 
-            var htmlfile = Path.Combine(folderPath, "modlist.html");
-            var content = File.ReadAllLines(htmlfile).ToList();
-
-            content.RemoveAt(0);
-            content.RemoveAt(content.Count - 1);
-
-            var mods = new List<Tuple<string, string>>();
-
-            for (int i = 0; i < content.Count; i++)
-            {
-                Match m = Regex.Match(content[i], @"^\<li\>\<a\shref\=""(?<url>[^""]+)""\>(?<name>[^\<]+)\<\/a\>\<\/li\>");
-                mods.Add(new (m.Groups["url"].Value, m.Groups["name"].Value));
-            }
-
-            if (mods.Count != content.Count)
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"Unexpected Error: Found less mods that the file contains ({mods.Count} vs {content.Count}). Exiting.");
-                Console.ResetColor();
-                Environment.Exit(0);
-            }
-
             var manifestfile = Path.Combine(folderPath, "manifest.json");
             var json = File.ReadAllText(manifestfile);
             var manifest = JsonConvert.DeserializeObject<Manifest>(json);
@@ -69,18 +49,12 @@ namespace CurseforgeZipDownloader
                 Environment.Exit(0);
             }
 
-            var modInfo = manifest.files;
-            if (modInfo.Count != mods.Count)
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"Unexpected Error: Found less mods in the manifest file than in the html file ({modInfo.Count} vs {mods.Count}). Exiting.");
-                Console.ResetColor();
-                Environment.Exit(0);
-            }
+            var modInfos = manifest.files;
+            var modUrls = new string[modInfos.Count];
 
-            for (int i = 0; i < mods.Count; i++)
+            for (int i = 0; i < modInfos.Count; i++)
             {
-                mods[i] = new Tuple<string, string>($"https://www.curseforge.com/api/v1/mods/{modInfo[i].projectID}/files/{modInfo[i].fileID}", mods[i].Item2);
+                modUrls[i] = $"https://www.curseforge.com/api/v1/mods/{modInfos[i].projectID}/files/{modInfos[i].fileID}";
             }
 
             var modDir = Path.Combine(cwd, "mods");
@@ -92,18 +66,36 @@ namespace CurseforgeZipDownloader
             Directory.SetCurrentDirectory(modDir);
 
             using var client = new HttpClient();
-            for (int i = 0; i < mods.Count; i++)
+            for (int i = 0; i < modUrls.Length; i++)
             {
-                Console.WriteLine($"{i + 1}. download: \"{mods[i].Item2}\"");
+                Console.Write($"Downloading mod {i + 1}/{modUrls.Length}: ");
 
-                var response = await client.GetAsync(mods[i].Item1);
+                var response = await client.GetAsync(modUrls[i]);
                 var data = await response.Content.ReadAsStringAsync();
 
-                var filename = Regex.Match(data, @"""fileName""\:""(?<filename>[^""]+)""");
+                var filenameMatch = Regex.Match(data, @"""fileName""\:""(?<filename>[^""]+)""");
+                var filename = filenameMatch.Groups["filename"].Value;
 
-                using var s = await client.GetStreamAsync(mods[i].Item1 + "/download");
-                using var fs = new FileStream(filename.Groups["filename"].Value, FileMode.OpenOrCreate);
+                Console.WriteLine(filename);
+
+                using var s = await client.GetStreamAsync(modUrls[i] + "/download");
+                using var fs = new FileStream(filename, FileMode.OpenOrCreate);
                 await s.CopyToAsync(fs);
+            }
+
+            Console.WriteLine($"\nNOTE: The folder \"{folderPath}\\overrides\" may contain config files, ressource packs, datapacks, etc. which are used by the modpack.");
+
+            var filesNotJar = Directory.GetFiles(modDir).Select(f => new FileInfo(f)).Where(fi => fi.Extension != ".jar").ToList();
+            if (filesNotJar.Count > 0)
+            {
+                Directory.CreateDirectory(AdditionalFolder);
+                Console.WriteLine($"\nNOTE: Files that are not .jar mods have been downloaded from the modlist. " +
+                    $"They could be texturepacks or datapacks. They will be moved to the \"{AdditionalFolder}\" folder inside of the mod folder:");
+                foreach (var file in filesNotJar)
+                {
+                    Console.WriteLine($"{filesNotJar.IndexOf(file) + 1}. {file.Name}");
+                    file.MoveTo(AdditionalFolder + $"\\{file.Name}");
+                }
             }
         }
 
